@@ -11,13 +11,14 @@ const usuarioRouter = require("./src/routes/usuarios");
 const authRouter = require("./src/routes/auth");
 const patrimonioRouter = require("./src/routes/bienesPatrimonio");
 const bienesRouter = require("./src/routes/bienes");
+const cotizacionesRouter = require("./src/routes/cotizaciones");
 
 
 const app = express();
 const port = 3001;
 const port2 = 3002;
 
-app.use(cors({origin:'http://10.30.1.46:8086',credentials: true}));
+app.use(cors({origin:'http://localhost:3000',credentials: true}));
 app.use(express.json())
 app.use(cookieParser());
 
@@ -26,6 +27,7 @@ app.use("/api/v1/orden", ordenCompraRouter);
 app.use("/api/v1/usuarios", usuarioRouter);
 app.use("/api/v1/patrimonio", patrimonioRouter);
 app.use("/api/v1/bienes", bienesRouter);
+app.use("/api/v1/cotizaciones", cotizacionesRouter);
 
 
 
