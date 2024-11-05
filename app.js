@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 var cors = require("cors");
 const cookieParser = require("cookie-parser");
+const path = require("path");
 
 const sequelize = require("./config/database");
 const sequelize1 = require("./config/database1");
@@ -17,9 +18,22 @@ const cotizacionesRouter = require("./src/routes/cotizaciones");
 const app = express();
 const port = 3001;
 const port2 = 3002;
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.use(cors({origin:'http://localhost:3000',credentials: true}));
-app.use(express.json())
+const allowedOrigins = ['http://localhost:3000', 'http://localhost:3003'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('No permitido por CORS'));
+    }
+  },
+  credentials: true
+}));app.use(express.json())
 app.use(cookieParser());
 
 app.use("/api/v1/auth", authRouter);

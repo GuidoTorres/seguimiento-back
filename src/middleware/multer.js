@@ -7,9 +7,10 @@ const storage = multer.diskStorage({
     cb(null, 'uploads/');
   },
   filename: function (req, file, cb) {
-    const sbn = req.body.sbn;
-
-    cb(null, `${sbn}`);
+    // Genera un nombre de archivo único usando la fecha actual y el nombre original
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const extension = path.extname(file.originalname);
+    cb(null, `${file.fieldname}-${uniqueSuffix}${extension}`);
   },
 });
 

@@ -181,7 +181,8 @@ const updatePdf = async (req, res) => {
     if (!file) {
       return res.status(400).json({ msg: "No se ha subido ningún archivo PDF." });
     }
-
+    console.log(file);
+    
     // Guarda la ruta del archivo en la base de datos
     await db.cotizaciones.update(
       { pdf: file.path }, // Guarda la ruta completa
@@ -199,8 +200,97 @@ const updatePdf = async (req, res) => {
   }
 };
 
+const updatePublicacion = async (req, res) => {
+  try {
+    const id = req.query.id;
+
+    // Guarda la ruta del archivo en la base de datos
+    await db.cotizaciones.update(
+      { estado: "completado" }, // Guarda la ruta completa
+      {
+        where: { id: id },
+      }
+    );
+
+    return res.status(200).json({ msg: "Publicado con éxito!" });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ msg: "No se pudo publicar." });
+  }
+};
+
+const getCotizacionCompleta = async (req, res) => {
+  try {
+    const { tipo } = req.query;
+
+    if (!tipo || !["B", "S"].includes(tipo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
+      });
+    }
+
+    // Verificar si necesitamos sincronizar
+    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
+
+    if (shouldSync) {
+      await sincronizarCotizaciones();
+      lastSyncTime = Date.now();
+    }
+
+    // Obtener datos de la API del tipo solicitado
+    const datosAPI = await obtenerDatosAPI(tipo);
+
+    // Obtener datos locales del tipo solicitado
+    const datosLocales = await db.cotizaciones.findAll({
+      where: { tipo, estado: "completado" },
+      raw: true,
+      order: [["sec_sol_mod", "DESC"]],
+    });
+
+    // Crear map de datos locales
+    const localesMap = new Map(
+      datosLocales.map((item) => [item.sec_sol_mod, item])
+    );
+
+    // Combinar datos
+    const datosCombinados = datosAPI.map((item) => {
+      const local = localesMap.get(item.SEC_SOL_MOD) || {
+        estado: "pendiente",
+        pdf: null,
+      };
+
+      return {
+        id: local.id, // Incluir el ID autoincrementable
+        secSolMod: item.SEC_SOL_MOD,
+        sbn: item.SBN,
+        glosa: item.GLOSA,
+        nombreItem: item.NOMBRE_ITEM,
+        nombreDependencia: item.NOMBRE_DEPEND,
+        estado: local.estado,
+        pdf: local.pdf ? `http://localhost:3001/${local.pdf.replace(/\\/g, '/')}` : null, // Convertir solo si existe `pdf`
+        tipo: local.tipo,
+      };
+    }).filter(item => item.estado === "completado");;
+
+    return res.json(datosCombinados);
+  } catch (error) {
+    console.error("Error en getCotizaciones:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener cotizaciones",
+      error: error.message,
+    });
+  }
+
+};
+
+
+
 
 module.exports = {
   getCotizaciones,
   updatePdf,
+  updatePublicacion,
+  getCotizacionCompleta
 };
