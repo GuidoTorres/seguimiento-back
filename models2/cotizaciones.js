@@ -8,8 +8,24 @@ module.exports = function (sequelize, DataTypes) {
         allowNull: true,
         primaryKey: true,
       },
-      nombre: {
-        type: DataTypes.STRING(100),
+      sec_sol_mod: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      sbn: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+      },
+      estado: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+      },
+      pdf: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+      tipo: {
+        type: DataTypes.STRING(20),
         allowNull: true,
       },
       createdAt: {
@@ -20,10 +36,22 @@ module.exports = function (sequelize, DataTypes) {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      anio: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       tableName: "cotizaciones", // Nombre explícito de la tabla
       timestamps: true, // Para habilitar createdAt y updatedAt
+      indexes: [
+        {
+          fields: ["tipo"],
+        },
+        {
+          fields: ["sbn"],
+        },
+      ],
     }
   );
 };

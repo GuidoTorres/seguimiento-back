@@ -8,6 +8,7 @@ const RolModel = require("./roles");
 const PermisoModel = require("./permisos");
 const RolPermisoModel = require("./rol_permiso");
 const UsuarioRolModel = require("./usuario_rol");
+const CotizacionModel = require("./cotizaciones")
 
 function initModels(sequelize) {
   const Estados = EstadosModel(sequelize, Sequelize);
@@ -19,6 +20,8 @@ function initModels(sequelize) {
   const Permisos = PermisoModel(sequelize, Sequelize);
   const RolPermiso = RolPermisoModel(sequelize, Sequelize);
   const UsuarioRol = UsuarioRolModel(sequelize, Sequelize);
+  const Cotizaciones = CotizacionModel(sequelize, Sequelize);
+
 
   Usuario.hasMany(UsuarioCentroCosto, { foreignKey: "usuario_id" });
   CentroCosto.hasMany(UsuarioCentroCosto, { foreignKey: "centro_costo_id" });
@@ -54,6 +57,7 @@ function initModels(sequelize) {
     OrdenCompra,
     Usuario,
     UsuarioCentroCosto,
+    Cotizaciones
   };
 }
 
