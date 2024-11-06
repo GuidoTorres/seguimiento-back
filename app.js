@@ -20,7 +20,7 @@ const port = 3001;
 const port2 = 3002;
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-const allowedOrigins = ['http://localhost:3000', 'http://localhost:3003'];
+const allowedOrigins = ['http://localhost:3000', 'http://localhost:3003', 'http://10.30.1.46:8086'];
 
 app.use(cors({
   origin: function (origin, callback) {
