@@ -202,11 +202,21 @@ const updatePdf = async (req, res) => {
 
 const updatePublicacion = async (req, res) => {
   try {
-    const id = req.query.id;
+    const { id, tipo } = req.query; // `tipo` debe ser "B" o "S" y se pasa en la consulta
 
-    // Guarda la ruta del archivo en la base de datos
+
+    // Obtén el correlativo máximo actual para el tipo específico y agrégale 1
+    const maxCorrelativo = await db.cotizaciones.max('correlativo', {
+      where: { tipo: tipo }
+    });
+    const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
+
+    // Actualiza la publicación con el nuevo correlativo y el estado "completado"
     await db.cotizaciones.update(
-      { estado: "completado" }, // Guarda la ruta completa
+      {
+        estado: "completado",
+        correlativo: nuevoCorrelativo,
+      },
       {
         where: { id: id },
       }
@@ -218,6 +228,8 @@ const updatePublicacion = async (req, res) => {
     return res.status(500).json({ msg: "No se pudo publicar." });
   }
 };
+
+
 
 const getCotizacionCompleta = async (req, res) => {
   try {
