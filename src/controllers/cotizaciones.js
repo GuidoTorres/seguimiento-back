@@ -280,7 +280,7 @@ const getCotizacionCompleta = async (req, res) => {
         nombreItem: item.NOMBRE_ITEM,
         nombreDependencia: item.NOMBRE_DEPEND,
         estado: local.estado,
-        pdf: local.pdf ? `http://localhost:3001/${local.pdf.replace(/\\/g, '/')}` : null, // Convertir solo si existe `pdf`
+        pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null, // Convertir solo si existe `pdf`
         tipo: local.tipo,
       };
     }).filter(item => item.estado === "completado");;
