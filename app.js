@@ -20,18 +20,8 @@ const port = 3001;
 const port2 = 3002;
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-const allowedOrigins = ['http://localhost:3000', 'http://localhost:3003', 'http://10.30.1.46:8086'];
-
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('No permitido por CORS'));
-    }
-  },
+  origin: '*',  // Permite cualquier origen
   credentials: true
 }));
 app.use(express.json())
