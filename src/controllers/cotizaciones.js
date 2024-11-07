@@ -207,6 +207,9 @@ const getCotizaciones = async (req, res) => {
   }
 };
 
+const fs = require('fs').promises; // Para manejo de archivos
+const path = require('path'); // Para manejo de rutas
+
 const updatePdf = async (req, res) => {
   try {
     const file = req.file; // Multer guarda el archivo en `req.file`
@@ -215,9 +218,24 @@ const updatePdf = async (req, res) => {
     if (!file) {
       return res.status(400).json({ msg: "No se ha subido ningún archivo PDF." });
     }
-    console.log(file);
-    
-    // Guarda la ruta del archivo en la base de datos
+
+    // Primero, obtener la publicación actual para conseguir la ruta del PDF anterior
+    const publicacionActual = await db.cotizaciones.findOne({
+      where: { id: id }
+    });
+
+    // Si existe un PDF anterior, intentar eliminarlo
+    if (publicacionActual?.pdf) {
+      try {
+        await fs.unlink(publicacionActual.pdf);
+        console.log(`PDF anterior eliminado: ${publicacionActual.pdf}`);
+      } catch (deleteError) {
+        // Si hay error al eliminar, solo lo registramos pero continuamos con la actualización
+        console.log('Error al eliminar PDF anterior:', deleteError);
+      }
+    }
+
+    // Guarda la ruta del nuevo archivo en la base de datos
     await db.cotizaciones.update(
       { pdf: file.path }, // Guarda la ruta completa
       {
@@ -225,12 +243,27 @@ const updatePdf = async (req, res) => {
       }
     );
 
-    return res.status(200).json({ msg: "Pdf guardado con éxito!" });
+    return res.status(200).json({ 
+      msg: "PDF actualizado con éxito!",
+      path: file.path
+    });
+
   } catch (error) {
     console.log("====================================");
     console.log(error);
     console.log("====================================");
-    return res.status(500).json({ msg: "No se pudo guardar el pdf." });
+    
+    // Si hay error, intentamos eliminar el archivo recién subido para no dejar archivos huérfanos
+    if (req.file?.path) {
+      try {
+        await fs.unlink(req.file.path);
+        console.log('Archivo nuevo eliminado debido al error');
+      } catch (cleanupError) {
+        console.log('Error al limpiar archivo nuevo:', cleanupError);
+      }
+    }
+
+    return res.status(500).json({ msg: "No se pudo actualizar el PDF." });
   }
 };
 
