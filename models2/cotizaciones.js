@@ -44,6 +44,10 @@ module.exports = function (sequelize, DataTypes) {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      fecha_publicacion: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
     },
     {
       tableName: "cotizaciones", // Nombre explícito de la tabla

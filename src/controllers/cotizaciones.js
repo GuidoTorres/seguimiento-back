@@ -236,30 +236,53 @@ const updatePdf = async (req, res) => {
 
 const updatePublicacion = async (req, res) => {
   try {
-    const { id, tipo } = req.query; // `tipo` debe ser "B" o "S" y se pasa en la consulta
+    const { id, tipo } = req.query;
 
-
-    // Obtén el correlativo máximo actual para el tipo específico y agrégale 1
-    const maxCorrelativo = await db.cotizaciones.max('correlativo', {
-      where: { tipo: tipo }
+    // Primero, obtener el estado actual de la publicación
+    const publicacionActual = await db.cotizaciones.findOne({
+      where: { id: id }
     });
-    const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
 
-    // Actualiza la publicación con el nuevo correlativo y el estado "completado"
+    if (!publicacionActual) {
+      return res.status(404).json({ msg: "Publicación no encontrada." });
+    }
+
+    // Determinar el nuevo estado basado en el estado actual
+    const nuevoEstado = publicacionActual.estado === "pendiente" ? "completado" : "pendiente";
+
+    // Preparar los datos para la actualización
+    const datosActualizacion = {
+      estado: nuevoEstado
+    };
+
+    // Si el nuevo estado es "completado", agregar fecha y correlativo
+    if (nuevoEstado === "completado") {
+      // Obtener el correlativo máximo actual para el tipo específico
+      const maxCorrelativo = await db.cotizaciones.max('correlativo', {
+        where: { tipo: tipo }
+      });
+      const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
+
+      datosActualizacion.correlativo = nuevoCorrelativo;
+      datosActualizacion.fecha_publicacion = dayjs().format("DD/MM/YYYY");
+    } else {
+      datosActualizacion.fecha_publicacion = null;
+    }
+
     await db.cotizaciones.update(
-      {
-        estado: "completado",
-        correlativo: nuevoCorrelativo,
-      },
+      datosActualizacion,
       {
         where: { id: id },
       }
     );
 
-    return res.status(200).json({ msg: "Publicado con éxito!" });
+    return res.status(200).json({ 
+      msg: `Estado cambiado a ${nuevoEstado} con éxito!`,
+      nuevoEstado: nuevoEstado
+    });
   } catch (error) {
     console.log(error);
-    return res.status(500).json({ msg: "No se pudo publicar." });
+    return res.status(500).json({ msg: "Error al actualizar el estado." });
   }
 };
 
