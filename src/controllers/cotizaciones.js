@@ -294,7 +294,7 @@ const updatePublicacion = async (req, res) => {
       const maxCorrelativo = await db.cotizaciones.max('correlativo', {
         where: { tipo: tipo }
       });
-      const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
+      const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1001;
 
       datosActualizacion.correlativo = nuevoCorrelativo;
       datosActualizacion.fecha_publicacion = dayjs().format("DD/MM/YYYY");
@@ -374,6 +374,8 @@ const getCotizacionCompleta = async (req, res) => {
                       pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
                       tipo: local.tipo,
                       fechaRegistro: item.FECHA_REG,
+                      correlativo: local.correlativo,
+                      fecha: local.fecha_publicacion,
                       items: []
                   };
               }
