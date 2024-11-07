@@ -27,6 +27,7 @@ const obtenerDatosAPI = async (tipo) => {
       replacements: { tipo },
       type: QueryTypes.SELECT,
     }
+    
   );
   return datosApi || [];
 };
@@ -110,66 +111,99 @@ const sincronizarCotizaciones = async () => {
 
 const getCotizaciones = async (req, res) => {
   try {
-    const { tipo } = req.query;
+      const { tipo } = req.query;
 
-    if (!tipo || !["B", "S"].includes(tipo)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
+      if (!tipo || !["B", "S"].includes(tipo)) {
+          return res.status(400).json({
+              success: false,
+              message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
+          });
+      }
+
+      // Verificar si necesitamos sincronizar
+      const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
+
+      if (shouldSync) {
+          await sincronizarCotizaciones();
+          lastSyncTime = Date.now();
+      }
+
+      // Obtener datos de la API del tipo solicitado
+      const datosAPI = await obtenerDatosAPI(tipo);
+
+      // Obtener datos locales del tipo solicitado
+      const datosLocales = await db.cotizaciones.findAll({
+          where: { tipo },
+          raw: true,
+          order: [["sec_sol_mod", "DESC"]],
       });
-    }
 
-    // Verificar si necesitamos sincronizar
-    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
+      // Crear map de datos locales
+      const localesMap = new Map(
+          datosLocales.map((item) => [item.sec_sol_mod, item])
+      );
 
-    if (shouldSync) {
-      await sincronizarCotizaciones();
-      lastSyncTime = Date.now();
-    }
+      // Primero combinamos y luego agrupamos
+      const datosCombinados = datosAPI.reduce((acc, item) => {
+          const local = localesMap.get(item.SEC_SOL_MOD) || {
+              estado: "pendiente",
+              pdf: null,
+          };
 
-    // Obtener datos de la API del tipo solicitado
-    const datosAPI = await obtenerDatosAPI(tipo);
+          // Obtener el grupo actual o crear uno nuevo
+          const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
 
-    // Obtener datos locales del tipo solicitado
-    const datosLocales = await db.cotizaciones.findAll({
-      where: { tipo },
-      raw: true,
-      order: [["sec_sol_mod", "DESC"]],
-    });
+          if (grupo) {
+              // Si el grupo existe, agregamos el item
+              grupo.items.push({
+                  sbn: item.SBN,
+                  nombreItem: item.NOMBRE_ITEM,
+                  unidadMedida: item.NOMBRE || 'UNIDAD',
+                  cantidad: item.CANTIDAD || 1,
+                  precioUnitario: item.PRECIO_UNITARIO || 0,
+                  valorTotal: item.VALOR_TOTAL || 0
+              });
+          } else {
+              // Si el grupo no existe, creamos uno nuevo
+              acc.push({
+                  id: local.id,
+                  secSolMod: item.SEC_SOL_MOD,
+                  glosa: item.GLOSA,
+                  nombreDependencia: item.NOMBRE_DEPEND,
+                  estado: local.estado,
+                  pdf: local.pdf,
+                  tipo: local.tipo,
+                  fechaRegistro: item.FECHA_REG,
+                  items: [{
+                      sbn: item.SBN,
+                      nombreItem: item.NOMBRE_ITEM,
+                      unidadMedida: item.NOMBRE || 'UNIDAD',
+                      cantidad: item.CANTIDAD || 1,
+                      precioUnitario: item.PRECIO_UNITARIO || 0,
+                      valorTotal: item.VALOR_TOTAL || 0
+                  }]
+              });
+          }
 
-    // Crear map de datos locales
-    const localesMap = new Map(
-      datosLocales.map((item) => [item.sec_sol_mod, item])
-    );
+          return acc;
+      }, []);
 
-    // Combinar datos
-    const datosCombinados = datosAPI.map((item) => {
-      const local = localesMap.get(item.SEC_SOL_MOD) || {
-        estado: "pendiente",
-        pdf: null,
-      };
+      // Calculamos totales para cada grupo
+      const datosFinales = datosCombinados.map(grupo => ({
+          ...grupo,
+          totalItems: grupo.items.length,
+          valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
+      }));
 
-      return {
-        id: local.id, // Incluir el ID autoincrementable
-        secSolMod: item.SEC_SOL_MOD,
-        sbn: item.SBN,
-        glosa: item.GLOSA,
-        nombreItem: item.NOMBRE_ITEM,
-        nombreDependencia: item.NOMBRE_DEPEND,
-        estado: local.estado,
-        pdf: local.pdf,
-        tipo: local.tipo,
-      };
-    });
+      return res.json(datosFinales);
 
-    return res.json(datosCombinados);
   } catch (error) {
-    console.error("Error en getCotizaciones:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error al obtener cotizaciones",
-      error: error.message,
-    });
+      console.error("Error en getCotizaciones:", error);
+      return res.status(500).json({
+          success: false,
+          message: "Error al obtener cotizaciones",
+          error: error.message,
+      });
   }
 };
 
@@ -229,72 +263,98 @@ const updatePublicacion = async (req, res) => {
   }
 };
 
-
-
 const getCotizacionCompleta = async (req, res) => {
   try {
-    const { tipo } = req.query;
+      const { tipo } = req.query;
 
-    if (!tipo || !["B", "S"].includes(tipo)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
+      if (!tipo || !["B", "S"].includes(tipo)) {
+          return res.status(400).json({
+              success: false,
+              message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
+          });
+      }
+
+      // Verificar si necesitamos sincronizar
+      const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
+
+      if (shouldSync) {
+          await sincronizarCotizaciones();
+          lastSyncTime = Date.now();
+      }
+
+      // Obtener datos de la API del tipo solicitado
+      const datosAPI = await obtenerDatosAPI(tipo);
+
+      // Obtener datos locales del tipo solicitado
+      const datosLocales = await db.cotizaciones.findAll({
+          where: { 
+              tipo, 
+              estado: "completado" 
+          },
+          raw: true,
+          order: [["sec_sol_mod", "DESC"]],
       });
-    }
 
-    // Verificar si necesitamos sincronizar
-    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
+      // Crear map de datos locales
+      const localesMap = new Map(
+          datosLocales.map((item) => [item.sec_sol_mod, item])
+      );
 
-    if (shouldSync) {
-      await sincronizarCotizaciones();
-      lastSyncTime = Date.now();
-    }
+      // Agrupar y combinar datos
+      const grupos = {};
 
-    // Obtener datos de la API del tipo solicitado
-    const datosAPI = await obtenerDatosAPI(tipo);
+      datosAPI.forEach((item) => {
+          const local = localesMap.get(item.SEC_SOL_MOD);
+          
+          // Solo procesar si existe en locales y está completado
+          if (local && local.estado === "completado") {
+              if (!grupos[item.SEC_SOL_MOD]) {
+                  grupos[item.SEC_SOL_MOD] = {
+                      id: local.id,
+                      secSolMod: item.SEC_SOL_MOD,
+                      glosa: item.GLOSA,
+                      nombreDependencia: item.NOMBRE_DEPEND,
+                      estado: local.estado,
+                      pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
+                      tipo: local.tipo,
+                      fechaRegistro: item.FECHA_REG,
+                      items: []
+                  };
+              }
 
-    // Obtener datos locales del tipo solicitado
-    const datosLocales = await db.cotizaciones.findAll({
-      where: { tipo, estado: "completado" },
-      raw: true,
-      order: [["sec_sol_mod", "DESC"]],
-    });
+              grupos[item.SEC_SOL_MOD].items.push({
+                  sbn: item.SBN,
+                  nombreItem: item.NOMBRE_ITEM,
+                  unidadMedida: item.NOMBRE || 'UNIDAD',
+                  cantidad: item.CANTIDAD || 1,
+                  precioUnitario: item.PRECIO_UNITARIO || 0,
+                  valorTotal: item.VALOR_TOTAL || 0
+              });
+          }
+      });
 
-    // Crear map de datos locales
-    const localesMap = new Map(
-      datosLocales.map((item) => [item.sec_sol_mod, item])
-    );
+      // Convertir el objeto grupos a array y agregar totales
+      const datosCombinados = Object.values(grupos).map(grupo => ({
+          ...grupo,
+          totalItems: grupo.items.length,
+          valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
+      }));
 
-    // Combinar datos
-    const datosCombinados = datosAPI.map((item) => {
-      const local = localesMap.get(item.SEC_SOL_MOD) || {
-        estado: "pendiente",
-        pdf: null,
-      };
+      return res.json({
+          success: true,
+          data: datosCombinados,
+          total: datosCombinados.length,
+          lastSync: new Date(lastSyncTime).toISOString()
+      });
 
-      return {
-        id: local.id, // Incluir el ID autoincrementable
-        secSolMod: item.SEC_SOL_MOD,
-        sbn: item.SBN,
-        glosa: item.GLOSA,
-        nombreItem: item.NOMBRE_ITEM,
-        nombreDependencia: item.NOMBRE_DEPEND,
-        estado: local.estado,
-        pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null, // Convertir solo si existe `pdf`
-        tipo: local.tipo,
-      };
-    }).filter(item => item.estado === "completado");;
-
-    return res.json(datosCombinados);
   } catch (error) {
-    console.error("Error en getCotizaciones:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error al obtener cotizaciones",
-      error: error.message,
-    });
+      console.error("Error en getCotizacionCompleta:", error);
+      return res.status(500).json({
+          success: false,
+          message: "Error al obtener cotizaciones completadas",
+          error: error.message,
+      });
   }
-
 };
 
 
