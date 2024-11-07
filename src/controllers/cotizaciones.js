@@ -340,12 +340,7 @@ const getCotizacionCompleta = async (req, res) => {
           valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
       }));
 
-      return res.json({
-          success: true,
-          data: datosCombinados,
-          total: datosCombinados.length,
-          lastSync: new Date(lastSyncTime).toISOString()
-      });
+      return res.json(datosCombinados);
 
   } catch (error) {
       console.error("Error en getCotizacionCompleta:", error);
