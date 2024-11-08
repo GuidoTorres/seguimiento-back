@@ -348,7 +348,7 @@ const getCotizacionCompleta = async (req, res) => {
               estado: "completado" 
           },
           raw: true,
-          order: [["sec_sol_mod", "DESC"]],
+          order: [["correlativo", "DESC"]],
       });
 
       // Crear map de datos locales
