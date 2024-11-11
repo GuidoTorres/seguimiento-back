@@ -150,6 +150,18 @@ const getCotizaciones = async (req, res) => {
               pdf: null,
           };
 
+          // Calcular la fecha de vencimiento si `fecha_publicacion` está disponible
+          let fechaVencimiento = null;
+          if (local.fecha_publicacion) {
+              const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
+              fechaVencimiento = fechaPublicacion.add(2, 'day');
+
+              // Verificar si la fecha de vencimiento ya pasó
+              if (fechaVencimiento.isBefore(dayjs())) {
+                  return acc; // Omitir este registro si está vencido
+              }
+          }
+
           // Obtener el grupo actual o crear uno nuevo
           const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
 
@@ -171,9 +183,10 @@ const getCotizaciones = async (req, res) => {
                   glosa: item.GLOSA,
                   nombreDependencia: item.NOMBRE_DEPEND,
                   estado: local.estado,
-                  pdf: local.pdf,
+                  pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
                   tipo: local.tipo,
                   fechaRegistro: item.FECHA_REG,
+                  fechaVencimiento: fechaVencimiento ? fechaVencimiento.format("DD/MM/YYYY") : null, // Agregar la fecha de vencimiento
                   items: [{
                       sbn: item.SBN,
                       nombreItem: item.NOMBRE_ITEM,
@@ -206,9 +219,6 @@ const getCotizaciones = async (req, res) => {
       });
   }
 };
-
-const fs = require('fs').promises; // Para manejo de archivos
-const path = require('path'); // Para manejo de rutas
 
 const updatePdf = async (req, res) => {
   try {
@@ -288,15 +298,17 @@ const updatePublicacion = async (req, res) => {
       estado: nuevoEstado
     };
 
-    // Si el nuevo estado es "completado", agregar fecha y correlativo
+    // Si el nuevo estado es "completado" y no tiene un correlativo asignado, asignar uno
     if (nuevoEstado === "completado") {
-      // Obtener el correlativo máximo actual para el tipo específico
-      const maxCorrelativo = await db.cotizaciones.max('correlativo', {
-        where: { tipo: tipo }
-      });
-      const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1001;
-
-      datosActualizacion.correlativo = nuevoCorrelativo;
+      if (!publicacionActual.correlativo) { // Solo si el correlativo es null o undefined
+        const maxCorrelativo = await db.cotizaciones.max('correlativo', {
+          where: { tipo: tipo }
+        });
+        const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1001;
+        datosActualizacion.correlativo = nuevoCorrelativo;
+      } else {
+        datosActualizacion.correlativo = publicacionActual.correlativo;
+      }
       datosActualizacion.fecha_publicacion = dayjs().format("DD/MM/YYYY");
     } else {
       datosActualizacion.fecha_publicacion = null;
@@ -364,6 +376,15 @@ const getCotizacionCompleta = async (req, res) => {
           
           // Solo procesar si existe en locales y está completado
           if (local && local.estado === "completado") {
+              // Calcular fecha de vencimiento
+              const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
+              const fechaVencimiento = fechaPublicacion.add(2, 'day');
+
+              // Verificar si la fecha de vencimiento ya pasó
+              if (fechaVencimiento.isBefore(dayjs())) {
+                  return; // No agregar si la fecha de vencimiento ya pasó
+              }
+
               if (!grupos[item.SEC_SOL_MOD]) {
                   grupos[item.SEC_SOL_MOD] = {
                       id: local.id,
@@ -376,6 +397,7 @@ const getCotizacionCompleta = async (req, res) => {
                       fechaRegistro: item.FECHA_REG,
                       correlativo: local.correlativo,
                       fecha: local.fecha_publicacion,
+                      fechaVencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Agregar la fecha de vencimiento
                       items: []
                   };
               }
@@ -409,6 +431,7 @@ const getCotizacionCompleta = async (req, res) => {
       });
   }
 };
+
 
 
 
