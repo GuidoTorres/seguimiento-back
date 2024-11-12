@@ -2,10 +2,12 @@ const { QueryTypes } = require("sequelize");
 const dayjs = require("dayjs");
 const sequelize = require("../../config/database");
 const { models: db } = require("../../config/database1");
+const customParseFormat = require('dayjs/plugin/customParseFormat');
+
 // Variables para control de sincronización
 let lastSyncTime = 0;
 const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutos
-
+dayjs.extend(customParseFormat);
 const obtenerDatosAPI = async (tipo) => {
   const datosApi = await sequelize.query(
     `
@@ -27,7 +29,7 @@ const obtenerDatosAPI = async (tipo) => {
       replacements: { tipo },
       type: QueryTypes.SELECT,
     }
-    
+
   );
   return datosApi || [];
 };
@@ -111,112 +113,99 @@ const sincronizarCotizaciones = async () => {
 
 const getCotizaciones = async (req, res) => {
   try {
-      const { tipo } = req.query;
+    const { tipo } = req.query;
 
-      if (!tipo || !["B", "S"].includes(tipo)) {
-          return res.status(400).json({
-              success: false,
-              message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
-          });
-      }
-
-      // Verificar si necesitamos sincronizar
-      const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
-
-      if (shouldSync) {
-          await sincronizarCotizaciones();
-          lastSyncTime = Date.now();
-      }
-
-      // Obtener datos de la API del tipo solicitado
-      const datosAPI = await obtenerDatosAPI(tipo);
-
-      // Obtener datos locales del tipo solicitado
-      const datosLocales = await db.cotizaciones.findAll({
-          where: { tipo },
-          raw: true,
-          order: [["sec_sol_mod", "DESC"]],
+    if (!tipo || !["B", "S"].includes(tipo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
       });
+    }
 
-      // Crear map de datos locales
-      const localesMap = new Map(
-          datosLocales.map((item) => [item.sec_sol_mod, item])
-      );
+    // Verificar si necesitamos sincronizar
+    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
 
-      // Primero combinamos y luego agrupamos
-      const datosCombinados = datosAPI.reduce((acc, item) => {
-          const local = localesMap.get(item.SEC_SOL_MOD) || {
-              estado: "pendiente",
-              pdf: null,
-          };
+    if (shouldSync) {
+      await sincronizarCotizaciones();
+      lastSyncTime = Date.now();
+    }
 
-          // Calcular la fecha de vencimiento si `fecha_publicacion` está disponible
-          let fechaVencimiento = null;
-          if (local.fecha_publicacion) {
-              const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
-              fechaVencimiento = fechaPublicacion.add(2, 'day');
+    // Obtener datos de la API del tipo solicitado
+    const datosAPI = await obtenerDatosAPI(tipo);
 
-              // Verificar si la fecha de vencimiento ya pasó
-              if (fechaVencimiento.isBefore(dayjs())) {
-                  return acc; // Omitir este registro si está vencido
-              }
-          }
+    // Obtener datos locales del tipo solicitado
+    const datosLocales = await db.cotizaciones.findAll({
+      where: { tipo },
+      raw: true,
+      order: [["sec_sol_mod", "DESC"]],
+    });
 
-          // Obtener el grupo actual o crear uno nuevo
-          const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
+    // Crear map de datos locales
+    const localesMap = new Map(
+      datosLocales.map((item) => [item.sec_sol_mod, item])
+    );
 
-          if (grupo) {
-              // Si el grupo existe, agregamos el item
-              grupo.items.push({
-                  sbn: item.SBN,
-                  nombreItem: item.NOMBRE_ITEM,
-                  unidadMedida: item.NOMBRE || 'UNIDAD',
-                  cantidad: item.CANTIDAD || 1,
-                  precioUnitario: item.PRECIO_UNITARIO || 0,
-                  valorTotal: item.VALOR_TOTAL || 0
-              });
-          } else {
-              // Si el grupo no existe, creamos uno nuevo
-              acc.push({
-                  id: local.id,
-                  secSolMod: item.SEC_SOL_MOD,
-                  glosa: item.GLOSA,
-                  nombreDependencia: item.NOMBRE_DEPEND,
-                  estado: local.estado,
-                  pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
-                  tipo: local.tipo,
-                  fechaRegistro: item.FECHA_REG,
-                  fechaVencimiento: fechaVencimiento ? fechaVencimiento.format("DD/MM/YYYY") : null, // Agregar la fecha de vencimiento
-                  items: [{
-                      sbn: item.SBN,
-                      nombreItem: item.NOMBRE_ITEM,
-                      unidadMedida: item.NOMBRE || 'UNIDAD',
-                      cantidad: item.CANTIDAD || 1,
-                      precioUnitario: item.PRECIO_UNITARIO || 0,
-                      valorTotal: item.VALOR_TOTAL || 0
-                  }]
-              });
-          }
+    // Primero combinamos y luego agrupamos
+    const datosCombinados = datosAPI.reduce((acc, item) => {
+      const local = localesMap.get(item.SEC_SOL_MOD) || {
+        estado: "pendiente",
+        pdf: null,
+      };
 
-          return acc;
-      }, []);
+      // Obtener el grupo actual o crear uno nuevo
+      const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
 
-      // Calculamos totales para cada grupo
-      const datosFinales = datosCombinados.map(grupo => ({
-          ...grupo,
-          totalItems: grupo.items.length,
-          valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-      }));
+      if (grupo) {
+        // Si el grupo existe, agregamos el item
+        grupo.items.push({
+          sbn: item.SBN,
+          nombreItem: item.NOMBRE_ITEM,
+          unidadMedida: item.NOMBRE || 'UNIDAD',
+          cantidad: item.CANTIDAD || 1,
+          precioUnitario: item.PRECIO_UNITARIO || 0,
+          valorTotal: item.VALOR_TOTAL || 0
+        });
+      } else {
+        // Si el grupo no existe, creamos uno nuevo
+        acc.push({
+          id: local.id,
+          secSolMod: item.SEC_SOL_MOD,
+          glosa: item.GLOSA,
+          nombreDependencia: item.NOMBRE_DEPEND,
+          estado: local.estado,
+          pdf: local.pdf,
+          tipo: local.tipo,
+          fechaRegistro: item.FECHA_REG,
+          items: [{
+            sbn: item.SBN,
+            nombreItem: item.NOMBRE_ITEM,
+            unidadMedida: item.NOMBRE || 'UNIDAD',
+            cantidad: item.CANTIDAD || 1,
+            precioUnitario: item.PRECIO_UNITARIO || 0,
+            valorTotal: item.VALOR_TOTAL || 0
+          }]
+        });
+      }
 
-      return res.json(datosFinales);
+      return acc;
+    }, []);
+
+    // Calculamos totales para cada grupo
+    const datosFinales = datosCombinados.map(grupo => ({
+      ...grupo,
+      totalItems: grupo.items.length,
+      valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
+    }));
+
+    return res.json(datosFinales);
 
   } catch (error) {
-      console.error("Error en getCotizaciones:", error);
-      return res.status(500).json({
-          success: false,
-          message: "Error al obtener cotizaciones",
-          error: error.message,
-      });
+    console.error("Error en getCotizaciones:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener cotizaciones",
+      error: error.message,
+    });
   }
 };
 
@@ -253,7 +242,7 @@ const updatePdf = async (req, res) => {
       }
     );
 
-    return res.status(200).json({ 
+    return res.status(200).json({
       msg: "PDF actualizado con éxito!",
       path: file.path
     });
@@ -262,7 +251,7 @@ const updatePdf = async (req, res) => {
     console.log("====================================");
     console.log(error);
     console.log("====================================");
-    
+
     // Si hay error, intentamos eliminar el archivo recién subido para no dejar archivos huérfanos
     if (req.file?.path) {
       try {
@@ -321,7 +310,7 @@ const updatePublicacion = async (req, res) => {
       }
     );
 
-    return res.status(200).json({ 
+    return res.status(200).json({
       msg: `Estado cambiado a ${nuevoEstado} con éxito!`,
       nuevoEstado: nuevoEstado
     });
@@ -333,106 +322,104 @@ const updatePublicacion = async (req, res) => {
 
 const getCotizacionCompleta = async (req, res) => {
   try {
-      const { tipo } = req.query;
+    const { tipo } = req.query;
 
-      if (!tipo || !["B", "S"].includes(tipo)) {
-          return res.status(400).json({
-              success: false,
-              message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
-          });
-      }
-
-      // Verificar si necesitamos sincronizar
-      const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
-
-      if (shouldSync) {
-          await sincronizarCotizaciones();
-          lastSyncTime = Date.now();
-      }
-
-      // Obtener datos de la API del tipo solicitado
-      const datosAPI = await obtenerDatosAPI(tipo);
-
-      // Obtener datos locales del tipo solicitado
-      const datosLocales = await db.cotizaciones.findAll({
-          where: { 
-              tipo, 
-              estado: "completado" 
-          },
-          raw: true,
-          order: [["correlativo", "DESC"]],
+    if (!tipo || !["B", "S"].includes(tipo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
       });
+    }
 
-      // Crear map de datos locales
-      const localesMap = new Map(
-          datosLocales.map((item) => [item.sec_sol_mod, item])
-      );
+    // Verificar si necesitamos sincronizar
+    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
 
-      // Agrupar y combinar datos
-      const grupos = {};
+    if (shouldSync) {
+      await sincronizarCotizaciones();
+      lastSyncTime = Date.now();
+    }
 
-      datosAPI.forEach((item) => {
-          const local = localesMap.get(item.SEC_SOL_MOD);
-          
-          // Solo procesar si existe en locales y está completado
-          if (local && local.estado === "completado") {
-              // Calcular fecha de vencimiento
-              const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
-              const fechaVencimiento = fechaPublicacion.add(2, 'day');
+    // Obtener datos de la API del tipo solicitado
+    const datosAPI = await obtenerDatosAPI(tipo);
 
-              // Verificar si la fecha de vencimiento ya pasó
-              if (fechaVencimiento.isBefore(dayjs())) {
-                  return; // No agregar si la fecha de vencimiento ya pasó
-              }
+    // Obtener datos locales del tipo solicitado
+    const datosLocales = await db.cotizaciones.findAll({
+      where: {
+        tipo,
+        estado: "completado"
+      },
+      raw: true,
+      order: [["correlativo", "DESC"]],
+    });
 
-              if (!grupos[item.SEC_SOL_MOD]) {
-                  grupos[item.SEC_SOL_MOD] = {
-                      id: local.id,
-                      secSolMod: item.SEC_SOL_MOD,
-                      glosa: item.GLOSA,
-                      nombreDependencia: item.NOMBRE_DEPEND,
-                      estado: local.estado,
-                      pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
-                      tipo: local.tipo,
-                      fechaRegistro: item.FECHA_REG,
-                      correlativo: local.correlativo,
-                      fecha: local.fecha_publicacion,
-                      fechaVencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Agregar la fecha de vencimiento
-                      items: []
-                  };
-              }
+    // Crear map de datos locales
+    const localesMap = new Map(
+      datosLocales.map((item) => [item.sec_sol_mod, item])
+    );
 
-              grupos[item.SEC_SOL_MOD].items.push({
-                  sbn: item.SBN,
-                  nombreItem: item.NOMBRE_ITEM,
-                  unidadMedida: item.NOMBRE || 'UNIDAD',
-                  cantidad: item.CANTIDAD || 1,
-                  precioUnitario: item.PRECIO_UNITARIO || 0,
-                  valorTotal: item.VALOR_TOTAL || 0
-              });
-          }
-      });
+    // Agrupar y combinar datos
+    const grupos = {};
 
-      // Convertir el objeto grupos a array y agregar totales
-      const datosCombinados = Object.values(grupos).map(grupo => ({
-          ...grupo,
-          totalItems: grupo.items.length,
-          valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-      }));
+    datosAPI.forEach((item) => {
+      const local = localesMap.get(item.SEC_SOL_MOD);
 
-      return res.json(datosCombinados);
+      // Verificar si la fecha de vencimiento ya ha pasado
+      // Solo procesar si existe en locales y está completado
+      if (local && local.estado === "completado") {
+        if (!grupos[item.SEC_SOL_MOD]) {
+          const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
+          // Añade 2 días para calcular la fecha de vencimiento
+          const fechaVencimiento = fechaPublicacion.add(2, 'day');
+
+          // Compara la fecha de vencimiento con la fecha actual para determinar si ha vencido
+          const terminado = fechaVencimiento.isBefore(dayjs());
+          grupos[item.SEC_SOL_MOD] = {
+            id: local.id,
+            secSolMod: item.SEC_SOL_MOD,
+            glosa: item.GLOSA,
+            nombreDependencia: item.NOMBRE_DEPEND,
+            estado: local.estado,
+            pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
+            tipo: local.tipo,
+            fechaRegistro: item.FECHA_REG,
+            correlativo: local.correlativo,
+            fecha: local.fecha_publicacion,
+            fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Nueva fecha de vencimiento
+            terminado: terminado, // Nuevo campo terminado
+            items: []
+          };
+        }
+
+        grupos[item.SEC_SOL_MOD].items.push({
+          sbn: item.SBN,
+          nombreItem: item.NOMBRE_ITEM,
+          unidadMedida: item.NOMBRE || 'UNIDAD',
+          cantidad: item.CANTIDAD || 1,
+          precioUnitario: item.PRECIO_UNITARIO || 0,
+          valorTotal: item.VALOR_TOTAL || 0
+        });
+      }
+    });
+
+    // Convertir el objeto grupos a array y agregar totales
+    const datosCombinados = Object.values(grupos).map(grupo => ({
+      ...grupo,
+      totalItems: grupo.items.length,
+      valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
+    })).sort((a, b) => b.correlativo - a.correlativo); 
+    // .filter(item => !item.terminado);
+
+    return res.json(datosCombinados);
 
   } catch (error) {
-      console.error("Error en getCotizacionCompleta:", error);
-      return res.status(500).json({
-          success: false,
-          message: "Error al obtener cotizaciones completadas",
-          error: error.message,
-      });
+    console.error("Error en getCotizacionCompleta:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener cotizaciones completadas",
+      error: error.message,
+    });
   }
 };
-
-
 
 
 
