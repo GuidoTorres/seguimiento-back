@@ -3,7 +3,9 @@ const dayjs = require("dayjs");
 const sequelize = require("../../config/database");
 const { models: db } = require("../../config/database1");
 const customParseFormat = require('dayjs/plugin/customParseFormat');
-
+const fs = require('fs/promises');
+const fsSync = require('fs');
+const path = require('path');
 // Variables para control de sincronización
 let lastSyncTime = 0;
 const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutos
@@ -77,6 +79,7 @@ const sincronizarCotizaciones = async () => {
         tipo: item.tipo,
         estado: "pendiente",
         anio: dayjs().format("YYYY"),
+        plazo: 2
       }));
 
     // Insertar nuevos registros en lote
@@ -170,12 +173,13 @@ const getCotizaciones = async (req, res) => {
         acc.push({
           id: local.id,
           secSolMod: item.SEC_SOL_MOD,
-          glosa: item.GLOSA,
+          glosa: local.glosa ? local.glosa : item.GLOSA,
           nombreDependencia: item.NOMBRE_DEPEND,
           estado: local.estado,
           pdf: local.pdf,
           tipo: local.tipo,
           fechaRegistro: item.FECHA_REG,
+          plazo: local.plazo,
           items: [{
             sbn: item.SBN,
             nombreItem: item.NOMBRE_ITEM,
@@ -209,62 +213,114 @@ const getCotizaciones = async (req, res) => {
   }
 };
 
+
 const updatePdf = async (req, res) => {
   try {
-    const file = req.file; // Multer guarda el archivo en `req.file`
-    const id = req.body.id;
+    const file = req.file;
+    const { id } = req.body;
 
     if (!file) {
-      return res.status(400).json({ msg: "No se ha subido ningún archivo PDF." });
+      return res.status(400).json({
+        success: false,
+        msg: "No se ha subido ningún archivo PDF."
+      });
     }
 
-    // Primero, obtener la publicación actual para conseguir la ruta del PDF anterior
+    // Buscar la publicación en la base de datos
     const publicacionActual = await db.cotizaciones.findOne({
-      where: { id: id }
+      where: { id },
     });
 
-    // Si existe un PDF anterior, intentar eliminarlo
-    if (publicacionActual?.pdf) {
-      try {
-        await fs.unlink(publicacionActual.pdf);
-        console.log(`PDF anterior eliminado: ${publicacionActual.pdf}`);
-      } catch (deleteError) {
-        // Si hay error al eliminar, solo lo registramos pero continuamos con la actualización
-        console.log('Error al eliminar PDF anterior:', deleteError);
+    if (!publicacionActual) {
+      return res.status(404).json({
+        success: false,
+        msg: "Cotización no encontrada."
+      });
+    }
+
+    // Generar un nombre de archivo único
+    const timestamp = Date.now();
+    const newFileName = `cotizacion_${id}_${timestamp}.pdf`;
+    const newPath = path.join('uploads', 'cotizaciones', newFileName);
+
+    // Crear el directorio de subida si no existe
+    const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'cotizaciones');
+    if (!fsSync.existsSync(uploadDir)) {
+      await fs.mkdir(uploadDir, { recursive: true });
+    }
+
+    // Mover el archivo desde la carpeta temporal a la carpeta de destino
+    await fs.rename(file.path, path.join(uploadDir, newFileName));
+
+    // Intentar eliminar el PDF anterior si existe
+    if (publicacionActual.pdf) {
+      const oldPath = path.join(__dirname, '..', '..', publicacionActual.pdf);
+      if (fsSync.existsSync(oldPath)) {
+        try {
+          await fs.unlink(oldPath);
+        } catch (deleteError) {
+          console.error('Error al eliminar PDF anterior:', deleteError);
+        }
       }
     }
 
-    // Guarda la ruta del nuevo archivo en la base de datos
+    // Actualizar el registro en la base de datos con la nueva ruta del PDF
+    await publicacionActual.update({
+      pdf: newPath,
+      updated_at: new Date()
+    });
+
+    return res.status(200).json({
+      success: true,
+      msg: "PDF actualizado con éxito!",
+      data: {
+        id,
+        path: newPath // Corregir el acceso a newPath
+      }
+    });
+
+  } catch (error) {
+    console.error("Error en updatePdf:", error);
+
+    // Eliminar el archivo temporal en caso de error
+    if (req.file?.path) {
+      try {
+        await fs.unlink(req.file.path);
+      } catch (cleanupError) {
+        console.error('Error al limpiar archivo:', cleanupError);
+      }
+    }
+
+    return res.status(500).json({
+      success: false,
+      msg: "Error al actualizar el PDF.",
+      error: error.message
+    });
+  }
+};
+
+const updateGlosa = async (req, res) => {
+  try {
+    const glosa = req.body.glosa; // Multer guarda el archivo en `req.file`
+    const id = req.body.id;
+    const plazo = req.body.plazo
+
     await db.cotizaciones.update(
-      { pdf: file.path }, // Guarda la ruta completa
+      { glosa: glosa, plazo: plazo }, // Guarda la ruta completa
       {
         where: { id: id },
       }
     );
+    return res.status(200).json(
+      { msg: "Glosa actualizada con éxito!" }
 
-    return res.status(200).json({
-      msg: "PDF actualizado con éxito!",
-      path: file.path
-    });
+    );
 
   } catch (error) {
-    console.log("====================================");
     console.log(error);
-    console.log("====================================");
-
-    // Si hay error, intentamos eliminar el archivo recién subido para no dejar archivos huérfanos
-    if (req.file?.path) {
-      try {
-        await fs.unlink(req.file.path);
-        console.log('Archivo nuevo eliminado debido al error');
-      } catch (cleanupError) {
-        console.log('Error al limpiar archivo nuevo:', cleanupError);
-      }
-    }
-
-    return res.status(500).json({ msg: "No se pudo actualizar el PDF." });
+    return res.status(500).json({ msg: "No se pudo actualizar la glosa." });
   }
-};
+}
 
 const updatePublicacion = async (req, res) => {
   try {
@@ -382,14 +438,14 @@ const getCotizacionCompleta = async (req, res) => {
         if (!grupos[item.SEC_SOL_MOD]) {
           const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
           // Añade 2 días para calcular la fecha de vencimiento
-          const fechaVencimiento = fechaPublicacion.add(2, 'day');
+          const fechaVencimiento = fechaPublicacion.add(local.plazo, 'day');
 
           // Compara la fecha de vencimiento con la fecha actual para determinar si ha vencido
           const terminado = fechaVencimiento.isBefore(dayjs());
           grupos[item.SEC_SOL_MOD] = {
             id: local.id,
             secSolMod: item.SEC_SOL_MOD,
-            glosa: item.GLOSA,
+            glosa: local.glosa ? local.glosa : item.GLOSA,
             nombreDependencia: item.NOMBRE_DEPEND,
             estado: local.estado,
             pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
@@ -440,5 +496,6 @@ module.exports = {
   getCotizaciones,
   updatePdf,
   updatePublicacion,
-  getCotizacionCompleta
+  getCotizacionCompleta,
+  updateGlosa
 };

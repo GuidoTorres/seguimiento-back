@@ -48,6 +48,14 @@ module.exports = function (sequelize, DataTypes) {
         type: DataTypes.STRING,
         allowNull: true,
       },
+      plazo: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      glosa: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      }
     },
     {
       tableName: "cotizaciones", // Nombre explícito de la tabla
