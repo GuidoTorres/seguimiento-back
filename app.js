@@ -23,8 +23,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const allowedOrigins = ['http://localhost:3000', 'http://localhost:3003', 'http://10.30.1.46:8086'];
 
 app.use(cors("*"));
-app.use(express.json())
-app.use(cookieParser());
+app.use(express.json({ limit: '50mb' }));  // Ajuste para JSON
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/orden", ordenCompraRouter);
