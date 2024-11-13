@@ -275,6 +275,9 @@ const updatePublicacion = async (req, res) => {
       where: { id: id }
     });
 
+    console.log(publicacionActual.sec_sol_mod);
+
+
     if (!publicacionActual) {
       return res.status(404).json({ msg: "Publicación no encontrada." });
     }
@@ -309,11 +312,21 @@ const updatePublicacion = async (req, res) => {
         where: { id: id },
       }
     );
+    console.log(nuevoEstado);
 
-    return res.status(200).json({
-      msg: `Estado cambiado a ${nuevoEstado} con éxito!`,
-      nuevoEstado: nuevoEstado
-    });
+    if (nuevoEstado === 'completado') {
+      return res.status(200).json({
+        msg: `Se publicó con éxito la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
+        nuevoEstado: nuevoEstado
+      });
+
+    } else {
+      return res.status(200).json({
+        msg: `Se retiró con éxito la publicación de la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
+        nuevoEstado: nuevoEstado
+      });
+    }
+
   } catch (error) {
     console.log(error);
     return res.status(500).json({ msg: "Error al actualizar el estado." });
@@ -406,7 +419,7 @@ const getCotizacionCompleta = async (req, res) => {
       ...grupo,
       totalItems: grupo.items.length,
       valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    })).sort((a, b) => b.correlativo - a.correlativo); 
+    })).sort((a, b) => b.correlativo - a.correlativo);
     // .filter(item => !item.terminado);
 
     return res.json(datosCombinados);
