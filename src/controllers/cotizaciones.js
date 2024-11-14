@@ -448,7 +448,7 @@ const getCotizacionCompleta = async (req, res) => {
             glosa: local.glosa ? local.glosa : item.GLOSA,
             nombreDependencia: item.NOMBRE_DEPEND,
             estado: local.estado,
-            pdf: local.pdf ? `http://10.30.1.46:8086/${local.pdf.replace(/\\/g, '/')}` : null,
+            pdf: local.pdf ? `https://requerimientos.pems.pe/${local.pdf.replace(/\\/g, '/')}` : null,
             tipo: local.tipo,
             fechaRegistro: item.FECHA_REG,
             correlativo: local.correlativo,
