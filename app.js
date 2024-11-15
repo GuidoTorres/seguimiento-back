@@ -44,8 +44,6 @@ app.use("/api/v1/patrimonio", patrimonioRouter);
 app.use("/api/v1/bienes", bienesRouter);
 app.use("/api/v1/cotizaciones", cotizacionesRouter);
 
-
-
 sequelize
   .authenticate()
   .then(() => {

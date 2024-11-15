@@ -441,7 +441,7 @@ const getCotizacionCompleta = async (req, res) => {
           const fechaVencimiento = fechaPublicacion.add(local.plazo, 'day');
 
           // Compara la fecha de vencimiento con la fecha actual para determinar si ha vencido
-          const terminado = fechaVencimiento.isBefore(dayjs());
+          const terminado = fechaVencimiento.isBefore(dayjs(), "day");
           grupos[item.SEC_SOL_MOD] = {
             id: local.id,
             secSolMod: item.SEC_SOL_MOD,
@@ -475,8 +475,7 @@ const getCotizacionCompleta = async (req, res) => {
       ...grupo,
       totalItems: grupo.items.length,
       valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    })).sort((a, b) => b.correlativo - a.correlativo);
-    // .filter(item => !item.terminado);
+    })).sort((a, b) => b.correlativo - a.correlativo).filter(item => !item.terminado);
 
     return res.json(datosCombinados);
 
