@@ -155,11 +155,21 @@ const getCotizaciones = async (req, res) => {
         pdf: null,
       };
 
+      // Calcular la fecha de vencimiento si `fecha_publicacion` está disponible
+      let fechaVencimiento = null;
+      let terminado = false;
+      if (local.fecha_publicacion && local.plazo) {
+        const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
+        fechaVencimiento = fechaPublicacion.add(local.plazo, "day");
+
+        // Verificar si la fecha de vencimiento ya pasó
+        terminado = fechaVencimiento.isBefore(dayjs(), "day");
+      }
+
       // Obtener el grupo actual o crear uno nuevo
       const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
 
       if (grupo) {
-        // Si el grupo existe, agregamos el item
         grupo.items.push({
           sbn: item.SBN,
           nombreItem: item.NOMBRE_ITEM,
@@ -179,6 +189,9 @@ const getCotizaciones = async (req, res) => {
           pdf: local.pdf,
           tipo: local.tipo,
           fechaRegistro: item.FECHA_REG,
+          fecha: local.fecha_publicacion,
+          fecha_vencimiento: fechaVencimiento ? fechaVencimiento.format("DD/MM/YYYY") : null,
+          terminado: terminado,
           plazo: local.plazo,
           items: [{
             sbn: item.SBN,
@@ -199,7 +212,7 @@ const getCotizaciones = async (req, res) => {
       ...grupo,
       totalItems: grupo.items.length,
       valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    }));
+    })).filter(item => !item.terminado); // Filtrar solo los que no están vencidos
 
     return res.json(datosFinales);
 
@@ -212,6 +225,7 @@ const getCotizaciones = async (req, res) => {
     });
   }
 };
+
 
 
 const updatePdf = async (req, res) => {
