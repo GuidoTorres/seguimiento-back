@@ -212,7 +212,7 @@ const getCotizaciones = async (req, res) => {
       ...grupo,
       totalItems: grupo.items.length,
       valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    })).filter(item => !item.terminado); // Filtrar solo los que no están vencidos
+    })) // Filtrar solo los que no están vencidos
 
     return res.json(datosFinales);
 
