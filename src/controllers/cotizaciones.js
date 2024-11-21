@@ -489,7 +489,7 @@ const getCotizacionCompleta = async (req, res) => {
       ...grupo,
       totalItems: grupo.items.length,
       valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    })).sort((a, b) => b.correlativo - a.correlativo).filter(item => !item.terminado);
+    })).sort((a, b) => b.correlativo - a.correlativo);
 
     return res.json(datosCombinados);
 
