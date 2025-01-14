@@ -44,11 +44,8 @@ app.use("/api/v1/usuarios", usuarioRouter);
 app.use("/api/v1/patrimonio", patrimonioRouter);
 app.use("/api/v1/bienes", bienesRouter);
 app.use("/api/v1/cotizaciones", cotizacionesRouter);
-<<<<<<< HEAD
 app.use("/api/v1/recepcion", recepcionRouter);
 
-=======
->>>>>>> 822dfc0ef4f6c6f154a1d1f915957c0000e84b48
 
 sequelize
   .authenticate()
