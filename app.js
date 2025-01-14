@@ -13,6 +13,7 @@ const authRouter = require("./src/routes/auth");
 const patrimonioRouter = require("./src/routes/bienesPatrimonio");
 const bienesRouter = require("./src/routes/bienes");
 const cotizacionesRouter = require("./src/routes/cotizaciones");
+const recepcionRouter = require("./src/routes/recepcion");
 
 
 const app = express();
@@ -43,7 +44,7 @@ app.use("/api/v1/usuarios", usuarioRouter);
 app.use("/api/v1/patrimonio", patrimonioRouter);
 app.use("/api/v1/bienes", bienesRouter);
 app.use("/api/v1/cotizaciones", cotizacionesRouter);
-
+app.use("/api/v1/recepcion", recepcionRouter);
 
 
 sequelize

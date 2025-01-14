@@ -2,10 +2,10 @@ const { QueryTypes } = require("sequelize");
 const dayjs = require("dayjs");
 const sequelize = require("../../config/database");
 const { models: db } = require("../../config/database1");
-const customParseFormat = require('dayjs/plugin/customParseFormat');
-const fs = require('fs/promises');
-const fsSync = require('fs');
-const path = require('path');
+const customParseFormat = require("dayjs/plugin/customParseFormat");
+const fs = require("fs/promises");
+const fsSync = require("fs");
+const path = require("path");
 // Variables para control de sincronización
 let lastSyncTime = 0;
 const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutos
@@ -13,32 +13,21 @@ dayjs.extend(customParseFormat);
 const obtenerDatosAPI = async (tipo) => {
   const datosApi = await sequelize.query(
     `
-        SELECT SM.SEC_SOL_MOD, SM.GLOSA, 
-               CONCAT(CBS.GRUPO_BIEN, CBS.CLASE_BIEN, CBS.FAMILIA_BIEN,CBS.ITEM_BIEN) AS SBN, 
-               CBS.NOMBRE_ITEM, UM.NOMBRE, CMD.TIPO_BIEN, CC.NOMBRE_DEPEND 
-        FROM
-            SIG_SOLICITUD_MODIFICACION AS SM
-            INNER JOIN SIG_SOLICITUD_MODIFICACION_DET AS SMD ON (SM.ANNO_EJEC=SMD.ANNO_EJEC AND SM.SEC_EJEC =SMD.SEC_EJEC AND SM.SEC_SOL_MOD=SMD.SEC_SOL_MOD)
-            INNER JOIN SIG_CUADRO_MODIFICADO_DET AS CMD ON (CMD.SEC_EJEC= SMD.SEC_EJEC AND CMD.ANNO_EJEC=SMD.ANNO_EJEC AND CMD.CENTRO_COSTO=SMD.CENTRO_COSTO AND CMD.SEC_CUADRO=SMD.SEC_CUADRO AND CMD.SEC_ITEM=SMD.SEC_ITEM AND CMD.ANNO_PROG=SMD.ANNO_PROG)
-            INNER JOIN CATALOGO_BIEN_SERV AS CBS ON (CBS.SEC_EJEC=CMD.SEC_EJEC AND CBS.TIPO_BIEN = CMD.TIPO_BIEN AND CBS.GRUPO_BIEN=CMD.GRUPO_BIEN AND CBS.CLASE_BIEN = CMD.CLASE_BIEN AND CBS.FAMILIA_BIEN = CMD.FAMILIA_BIEN AND CBS.ITEM_BIEN = CMD.ITEM_BIEN)
-            INNER JOIN SIG_CENTRO_COSTO AS CC ON (CC.ANO_EJE = CMD.ANNO_EJEC AND CC.SEC_EJEC=CMD.SEC_EJEC AND CC.CENTRO_COSTO = CMD. CENTRO_COSTO)
-            INNER JOIN unidad_medida AS UM ON (UM.UNIDAD_MEDIDA= CMD.UNIDAD_MEDIDA)
-        WHERE
-            SM.SEC_EJEC=1137 AND SM.ANNO_EJEC=2024 AND SMD.ANNO_PROG=2024 
-            AND SM.ESTADO IN ('2') AND CMD.TIPO_BIEN=:tipo
-        ORDER BY SM.SEC_SOL_MOD DESC`,
+      SELECT        P.NRO_PEDIDO, P.MOTIVO_PEDIDO, CC.NOMBRE_DEPEND, P.TIPO_BIEN
+      FROM            SIG_PEDIDOS AS P
+                      INNER JOIN SIG_CENTRO_COSTO AS CC ON (CC.ANO_EJE = P.ANO_EJE AND CC.SEC_EJEC=P.SEC_EJEC AND CC.CENTRO_COSTO = P.CENTRO_COSTO)
+      WHERE        (P.ANO_EJE = '2025') AND (P.TIPO_BIEN =:tipo)      `,
     {
       replacements: { tipo },
       type: QueryTypes.SELECT,
     }
-
   );
   return datosApi || [];
 };
 
 const sincronizarCotizaciones = async () => {
   try {
-    // Sincronizar tanto bienes como servicios
+    // Sincronizar bienes y servicios
     const datosBienes = await obtenerDatosAPI("B");
     const datosServicios = await obtenerDatosAPI("S");
 
@@ -48,50 +37,60 @@ const sincronizarCotizaciones = async () => {
     // Combinar los datos
     const todosLosDatos = [
       ...(Array.isArray(datosBienes) ? datosBienes : []).map((item) => ({
-        ...item,
+        nro_pedido: item.NRO_PEDIDO,
+        motivo_pedido: item.MOTIVO_PEDIDO,
+        nombre_depend: item.NOMBRE_DEPEND,
         tipo: "B",
+        anio: dayjs().format("YYYY"),
       })),
       ...(Array.isArray(datosServicios) ? datosServicios : []).map((item) => ({
-        ...item,
+        nro_pedido: item.NRO_PEDIDO,
+        motivo_pedido: item.MOTIVO_PEDIDO,
+        nombre_depend: item.NOMBRE_DEPEND,
         tipo: "S",
+        anio: dayjs().format("YYYY"),
       })),
     ];
 
-    // Obtener datos existentes
+    // Obtener datos locales
     const datosLocales = await db.cotizaciones.findAll({
-      attributes: ["sec_sol_mod", "tipo"],
+      where: { anio: dayjs().format("YYYY") },
+      attributes: ["sec_sol_mod", "tipo", "anio"],
       raw: true,
     });
 
-    // Crear un Set para búsqueda rápida
+    // Crear un Set para evitar duplicados
     const datosLocalesSet = new Set(
-      datosLocales.map((item) => `${item.sec_sol_mod}-${item.tipo}`)
+      datosLocales.map(
+        (item) => `${item.sec_sol_mod}-${item.tipo}-${item.anio}`
+      )
     );
 
-    // Preparar registros nuevos
+    // Preparar nuevos registros
     const nuevosRegistros = todosLosDatos
       .filter(
-        (item) => !datosLocalesSet.has(`${item.SEC_SOL_MOD}-${item.tipo}`)
+        (item) =>
+          !datosLocalesSet.has(`${item.nro_pedido}-${item.tipo}-${item.anio}`)
       )
       .map((item) => ({
-        sec_sol_mod: item.SEC_SOL_MOD,
-        sbn: item.SBN,
+        sec_sol_mod: item.nro_pedido,
+        sbn: null, // Establecer SBN como null o eliminarlo de la tabla
         tipo: item.tipo,
         estado: "pendiente",
         anio: dayjs().format("YYYY"),
-        plazo: 2
+        plazo: 2,
       }));
 
-    // Insertar nuevos registros en lote
+    // Insertar nuevos registros
     if (nuevosRegistros.length > 0) {
       try {
         await db.cotizaciones.bulkCreate(nuevosRegistros, {
-          ignoreDuplicates: true, // Ignorar registros duplicados en lugar de fallar
+          ignoreDuplicates: true,
         });
         console.log(`Sincronizados ${nuevosRegistros.length} nuevos registros`);
       } catch (error) {
         console.error("Error en bulkCreate:", error);
-        // Intentar insertar uno por uno si falla el bulk
+        // Insertar uno por uno en caso de error
         for (const registro of nuevosRegistros) {
           try {
             await db.cotizaciones.create(registro);
@@ -118,6 +117,7 @@ const getCotizaciones = async (req, res) => {
   try {
     const { tipo } = req.query;
 
+    // Validar el parámetro `tipo`
     if (!tipo || !["B", "S"].includes(tipo)) {
       return res.status(400).json({
         success: false,
@@ -125,90 +125,61 @@ const getCotizaciones = async (req, res) => {
       });
     }
 
-    // Verificar si necesitamos sincronizar
-    const shouldSync = Date.now() - lastSyncTime > SYNC_INTERVAL;
-
-    if (shouldSync) {
-      await sincronizarCotizaciones();
-      lastSyncTime = Date.now();
-    }
-
-    // Obtener datos de la API del tipo solicitado
+    // Obtener datos desde la API
     const datosAPI = await obtenerDatosAPI(tipo);
 
-    // Obtener datos locales del tipo solicitado
+    // Obtener datos locales desde la tabla `cotizaciones`
     const datosLocales = await db.cotizaciones.findAll({
       where: { tipo },
       raw: true,
       order: [["sec_sol_mod", "DESC"]],
     });
 
-    // Crear map de datos locales
+    // Crear un mapa para acceder rápidamente a los datos locales por `nro_pedido`
     const localesMap = new Map(
       datosLocales.map((item) => [item.sec_sol_mod, item])
     );
 
-    // Primero combinamos y luego agrupamos
-    const datosCombinados = datosAPI.reduce((acc, item) => {
-      const local = localesMap.get(item.SEC_SOL_MOD) || {
+    // Combinar los datos
+    const datosCombinados = datosAPI.map((item) => {
+      const local = localesMap.get(item.NRO_PEDIDO) || {
+        id: null,
         estado: "pendiente",
         pdf: null,
+        tipo: item.TIPO_BIEN,
+        anio: new Date().getFullYear().toString(),
+        correlativo: null,
+        sbn: null,
+        plazo:null
       };
 
-      // Obtener el grupo actual o crear uno nuevo
-      const grupo = acc.find(g => g.secSolMod === item.SEC_SOL_MOD);
+      return {
+        secSolMod: item.NRO_PEDIDO,
+        glosa: item.MOTIVO_PEDIDO,
+        nombreDependencia: item.NOMBRE_DEPEND,
+        tipo: local.tipo || item.TIPO_BIEN,
+        estado: local.estado,
+        pdf: local.pdf,
+        id: local.id,
+        anio: local.anio,
+        correlativo: local.correlativo,
+        sbn: local.sbn,
+        plazo: local.plazo
+      };
+    });
 
-      if (grupo) {
-        // Si el grupo existe, agregamos el item
-        grupo.items.push({
-          sbn: item.SBN,
-          nombreItem: item.NOMBRE_ITEM,
-          unidadMedida: item.NOMBRE || 'UNIDAD',
-          cantidad: item.CANTIDAD || 1,
-          precioUnitario: item.PRECIO_UNITARIO || 0,
-          valorTotal: item.VALOR_TOTAL || 0
-        });
-      } else {
-        // Si el grupo no existe, creamos uno nuevo
-        acc.push({
-          id: local.id,
-          secSolMod: item.SEC_SOL_MOD,
-          glosa: local.glosa ? local.glosa : item.GLOSA,
-          nombreDependencia: item.NOMBRE_DEPEND,
-          estado: local.estado,
-          pdf: local.pdf,
-          tipo: local.tipo,
-          fechaRegistro: item.FECHA_REG,
-          plazo: local.plazo,
-          items: [{
-            sbn: item.SBN,
-            nombreItem: item.NOMBRE_ITEM,
-            unidadMedida: item.NOMBRE || 'UNIDAD',
-            cantidad: item.CANTIDAD || 1,
-            precioUnitario: item.PRECIO_UNITARIO || 0,
-            valorTotal: item.VALOR_TOTAL || 0
-          }]
-        });
-      }
+    datosCombinados.sort((a, b) => {
+      const numA = parseInt(a.secSolMod, 10); // Convertir a número
+      const numB = parseInt(b.secSolMod, 10); // Convertir a número
+      return numB - numA; // Orden descendente
+    });
 
-      return acc;
-    }, []);
-
-    // Calculamos totales para cada grupo
-    const datosFinales = datosCombinados.map(grupo => ({
-      ...grupo,
-      totalItems: grupo.items.length,
-      valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    }));
-
-    return res.json(datosFinales);
-
+    res.status(200).json(datosCombinados);
   } catch (error) {
     console.error("Error en getCotizaciones:", error);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: "Error al obtener cotizaciones",
-      error: error.message,
+      message: "Error al obtener las cotizaciones",
     });
   }
 };
@@ -222,7 +193,7 @@ const updatePdf = async (req, res) => {
     if (!file) {
       return res.status(400).json({
         success: false,
-        msg: "No se ha subido ningún archivo PDF."
+        msg: "No se ha subido ningún archivo PDF.",
       });
     }
 
@@ -234,17 +205,23 @@ const updatePdf = async (req, res) => {
     if (!publicacionActual) {
       return res.status(404).json({
         success: false,
-        msg: "Cotización no encontrada."
+        msg: "Cotización no encontrada.",
       });
     }
 
     // Generar un nombre de archivo único
     const timestamp = Date.now();
     const newFileName = `cotizacion_${id}_${timestamp}.pdf`;
-    const newPath = path.join('uploads', 'cotizaciones', newFileName);
+    const newPath = path.join("uploads", "cotizaciones", newFileName);
 
     // Crear el directorio de subida si no existe
-    const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'cotizaciones');
+    const uploadDir = path.join(
+      __dirname,
+      "..",
+      "..",
+      "uploads",
+      "cotizaciones"
+    );
     if (!fsSync.existsSync(uploadDir)) {
       await fs.mkdir(uploadDir, { recursive: true });
     }
@@ -254,12 +231,12 @@ const updatePdf = async (req, res) => {
 
     // Intentar eliminar el PDF anterior si existe
     if (publicacionActual.pdf) {
-      const oldPath = path.join(__dirname, '..', '..', publicacionActual.pdf);
+      const oldPath = path.join(__dirname, "..", "..", publicacionActual.pdf);
       if (fsSync.existsSync(oldPath)) {
         try {
           await fs.unlink(oldPath);
         } catch (deleteError) {
-          console.error('Error al eliminar PDF anterior:', deleteError);
+          console.error("Error al eliminar PDF anterior:", deleteError);
         }
       }
     }
@@ -267,7 +244,7 @@ const updatePdf = async (req, res) => {
     // Actualizar el registro en la base de datos con la nueva ruta del PDF
     await publicacionActual.update({
       pdf: newPath,
-      updated_at: new Date()
+      updated_at: new Date(),
     });
 
     return res.status(200).json({
@@ -275,10 +252,9 @@ const updatePdf = async (req, res) => {
       msg: "PDF actualizado con éxito!",
       data: {
         id,
-        path: newPath // Corregir el acceso a newPath
-      }
+        path: newPath, // Corregir el acceso a newPath
+      },
     });
-
   } catch (error) {
     console.error("Error en updatePdf:", error);
 
@@ -287,14 +263,14 @@ const updatePdf = async (req, res) => {
       try {
         await fs.unlink(req.file.path);
       } catch (cleanupError) {
-        console.error('Error al limpiar archivo:', cleanupError);
+        console.error("Error al limpiar archivo:", cleanupError);
       }
     }
 
     return res.status(500).json({
       success: false,
       msg: "Error al actualizar el PDF.",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -303,7 +279,7 @@ const updateGlosa = async (req, res) => {
   try {
     const glosa = req.body.glosa; // Multer guarda el archivo en `req.file`
     const id = req.body.id;
-    const plazo = req.body.plazo
+    const plazo = req.body.plazo;
 
     await db.cotizaciones.update(
       { glosa: glosa, plazo: plazo }, // Guarda la ruta completa
@@ -311,16 +287,12 @@ const updateGlosa = async (req, res) => {
         where: { id: id },
       }
     );
-    return res.status(200).json(
-      { msg: "Glosa actualizada con éxito!" }
-
-    );
-
+    return res.status(200).json({ msg: "Glosa actualizada con éxito!" });
   } catch (error) {
     console.log(error);
     return res.status(500).json({ msg: "No se pudo actualizar la glosa." });
   }
-}
+};
 
 const updatePublicacion = async (req, res) => {
   try {
@@ -328,29 +300,30 @@ const updatePublicacion = async (req, res) => {
 
     // Primero, obtener el estado actual de la publicación
     const publicacionActual = await db.cotizaciones.findOne({
-      where: { id: id }
+      where: { id: id },
     });
 
     console.log(publicacionActual.sec_sol_mod);
-
 
     if (!publicacionActual) {
       return res.status(404).json({ msg: "Publicación no encontrada." });
     }
 
     // Determinar el nuevo estado basado en el estado actual
-    const nuevoEstado = publicacionActual.estado === "pendiente" ? "completado" : "pendiente";
+    const nuevoEstado =
+      publicacionActual.estado === "pendiente" ? "completado" : "pendiente";
 
     // Preparar los datos para la actualización
     const datosActualizacion = {
-      estado: nuevoEstado
+      estado: nuevoEstado,
     };
 
     // Si el nuevo estado es "completado" y no tiene un correlativo asignado, asignar uno
     if (nuevoEstado === "completado") {
-      if (!publicacionActual.correlativo) { // Solo si el correlativo es null o undefined
-        const maxCorrelativo = await db.cotizaciones.max('correlativo', {
-          where: { tipo: tipo }
+      if (!publicacionActual.correlativo) {
+        // Solo si el correlativo es null o undefined
+        const maxCorrelativo = await db.cotizaciones.max("correlativo", {
+          where: { tipo: tipo },
         });
         const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1001;
         datosActualizacion.correlativo = nuevoCorrelativo;
@@ -362,27 +335,22 @@ const updatePublicacion = async (req, res) => {
       datosActualizacion.fecha_publicacion = null;
     }
 
-    await db.cotizaciones.update(
-      datosActualizacion,
-      {
-        where: { id: id },
-      }
-    );
+    await db.cotizaciones.update(datosActualizacion, {
+      where: { id: id },
+    });
     console.log(nuevoEstado);
 
-    if (nuevoEstado === 'completado') {
+    if (nuevoEstado === "completado") {
       return res.status(200).json({
         msg: `Se publicó con éxito la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
-        nuevoEstado: nuevoEstado
+        nuevoEstado: nuevoEstado,
       });
-
     } else {
       return res.status(200).json({
         msg: `Se retiró con éxito la publicación de la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
-        nuevoEstado: nuevoEstado
+        nuevoEstado: nuevoEstado,
       });
     }
-
   } catch (error) {
     console.log(error);
     return res.status(500).json({ msg: "Error al actualizar el estado." });
@@ -415,7 +383,8 @@ const getCotizacionCompleta = async (req, res) => {
     const datosLocales = await db.cotizaciones.findAll({
       where: {
         tipo,
-        estado: "completado"
+        estado: "completado",
+        anio: dayjs().format("YYYY")
       },
       raw: true,
       order: [["correlativo", "DESC"]],
@@ -426,60 +395,41 @@ const getCotizacionCompleta = async (req, res) => {
       datosLocales.map((item) => [item.sec_sol_mod, item])
     );
 
-    // Agrupar y combinar datos
-    const grupos = {};
-
-    datosAPI.forEach((item) => {
-      const local = localesMap.get(item.SEC_SOL_MOD);
-
-      // Verificar si la fecha de vencimiento ya ha pasado
-      // Solo procesar si existe en locales y está completado
+    const datosCombinados = datosAPI.map((item) => {
+      // Buscar el dato correspondiente en datosLocales usando el NRO_PEDIDO / sec_sol_mod
+      const local = datosLocales.find((local) => local.sec_sol_mod === item.NRO_PEDIDO);
+    
       if (local && local.estado === "completado") {
-        if (!grupos[item.SEC_SOL_MOD]) {
-          const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
-          // Añade 2 días para calcular la fecha de vencimiento
-          const fechaVencimiento = fechaPublicacion.add(local.plazo, 'day');
-
-          // Compara la fecha de vencimiento con la fecha actual para determinar si ha vencido
-          const terminado = fechaVencimiento.isBefore(dayjs());
-          grupos[item.SEC_SOL_MOD] = {
-            id: local.id,
-            secSolMod: item.SEC_SOL_MOD,
-            glosa: local.glosa ? local.glosa : item.GLOSA,
-            nombreDependencia: item.NOMBRE_DEPEND,
-            estado: local.estado,
-            pdf: local.pdf ? `https://requerimientos.pems.pe/${local.pdf.replace(/\\/g, '/')}` : null,
-            tipo: local.tipo,
-            fechaRegistro: item.FECHA_REG,
-            correlativo: local.correlativo,
-            fecha: local.fecha_publicacion,
-            fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Nueva fecha de vencimiento
-            terminado: terminado, // Nuevo campo terminado
-            items: []
-          };
-        }
-
-        grupos[item.SEC_SOL_MOD].items.push({
-          sbn: item.SBN,
-          nombreItem: item.NOMBRE_ITEM,
-          unidadMedida: item.NOMBRE || 'UNIDAD',
-          cantidad: item.CANTIDAD || 1,
-          precioUnitario: item.PRECIO_UNITARIO || 0,
-          valorTotal: item.VALOR_TOTAL || 0
-        });
+        // Calcular la fecha de vencimiento a partir de la fecha de publicación y el plazo
+        const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
+        const fechaVencimiento = fechaPublicacion.add(local.plazo || 2, "day"); // Plazo predeterminado de 2 días si no existe
+    
+        // Verificar si la fecha de vencimiento ha pasado
+        const terminado = fechaVencimiento.isBefore(dayjs());
+    
+        // Combinar los datos de datosAPI y datosLocales
+        return {
+          id: local.id,
+          secSolMod: item.NRO_PEDIDO, // Usar el NRO_PEDIDO de datosAPI
+          glosa: local.glosa || item.MOTIVO_PEDIDO, // Priorizar glosa local si existe
+          nombreDependencia: item.NOMBRE_DEPEND,
+          estado: local.estado,
+          pdf: local.pdf
+            ? `https://requerimientos.pems.pe/${local.pdf.replace(/\\/g, "/")}`
+            : null,
+          tipo: local.tipo,
+          fechaRegistro: item.FECHA_REG, // Asegúrate de que FECHA_REG esté en datosAPI
+          correlativo: local.correlativo,
+          fecha: local.fecha_publicacion, // Fecha de publicación de datosLocales
+          fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Fecha de vencimiento
+          terminado: terminado, // Estado de vencimiento
+        };
       }
-    });
-
-    // Convertir el objeto grupos a array y agregar totales
-    const datosCombinados = Object.values(grupos).map(grupo => ({
-      ...grupo,
-      totalItems: grupo.items.length,
-      valorTotal: grupo.items.reduce((sum, item) => sum + (item.valorTotal || 0), 0),
-    })).sort((a, b) => b.correlativo - a.correlativo);
-    // .filter(item => !item.terminado);
+    
+      return null; // Excluir elementos que no estén completados o que no tengan datos locales
+    }).filter((item) => item !== null).sort((a, b) => b.correlativo - a.correlativo);;
 
     return res.json(datosCombinados);
-
   } catch (error) {
     console.error("Error en getCotizacionCompleta:", error);
     return res.status(500).json({
@@ -490,12 +440,10 @@ const getCotizacionCompleta = async (req, res) => {
   }
 };
 
-
-
 module.exports = {
   getCotizaciones,
   updatePdf,
   updatePublicacion,
   getCotizacionCompleta,
-  updateGlosa
+  updateGlosa,
 };
