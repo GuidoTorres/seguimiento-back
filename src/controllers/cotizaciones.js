@@ -185,6 +185,7 @@ const getCotizaciones = async (req, res) => {
 };
 
 
+
 const updatePdf = async (req, res) => {
   try {
     const file = req.file;
@@ -290,7 +291,7 @@ const updateGlosa = async (req, res) => {
     return res.status(200).json({ msg: "Glosa actualizada con éxito!" });
   } catch (error) {
     console.log(error);
-    return res.status(500).json({ msg: "No se pudo actualizar la glosa." });
+    return res.status(500).json({ msg: "No se pudo actualizar." });
   }
 };
 
