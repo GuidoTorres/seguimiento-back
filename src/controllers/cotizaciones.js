@@ -406,7 +406,7 @@ const getCotizacionCompleta = async (req, res) => {
         const fechaVencimiento = fechaPublicacion.add(local.plazo || 2, "day"); // Plazo predeterminado de 2 días si no existe
     
         // Verificar si la fecha de vencimiento ha pasado
-        const terminado = fechaVencimiento.isBefore(dayjs());
+        const terminado = dayjs().startOf('day').isAfter(fechaVencimiento.endOf('day'));
     
         // Combinar los datos de datosAPI y datosLocales
         return {
@@ -428,7 +428,7 @@ const getCotizacionCompleta = async (req, res) => {
       }
     
       return null; // Excluir elementos que no estén completados o que no tengan datos locales
-    }).filter((item) => item !== null).sort((a, b) => b.correlativo - a.correlativo);;
+    }).filter((item) => item !== null).sort((a, b) => b.correlativo - a.correlativo);
 
     return res.json(datosCombinados);
   } catch (error) {
