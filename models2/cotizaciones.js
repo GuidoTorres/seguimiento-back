@@ -49,7 +49,7 @@ module.exports = function (sequelize, DataTypes) {
         allowNull: true,
       },
       plazo: {
-        type: DataTypes.INTEGER,
+        type: DataTypes.STRING,
         allowNull: true,
       },
       glosa: {
