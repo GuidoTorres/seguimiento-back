@@ -42,6 +42,7 @@ const sincronizarCotizaciones = async () => {
         nombre_depend: item.NOMBRE_DEPEND,
         tipo: "B",
         anio: dayjs().format("YYYY"),
+        plazo: 48,
       })),
       ...(Array.isArray(datosServicios) ? datosServicios : []).map((item) => ({
         nro_pedido: item.NRO_PEDIDO,
@@ -49,6 +50,7 @@ const sincronizarCotizaciones = async () => {
         nombre_depend: item.NOMBRE_DEPEND,
         tipo: "S",
         anio: dayjs().format("YYYY"),
+        plazo: 48,
       })),
     ];
 
@@ -78,7 +80,7 @@ const sincronizarCotizaciones = async () => {
         tipo: item.tipo,
         estado: "pendiente",
         anio: dayjs().format("YYYY"),
-        plazo: 2,
+        plazo: item.plazo,
       }));
 
     // Insertar nuevos registros
@@ -116,7 +118,7 @@ const sincronizarCotizaciones = async () => {
 const getCotizaciones = async (req, res) => {
   try {
     const { tipo } = req.query;
-
+    
     // Validar el parámetro `tipo`
     if (!tipo || !["B", "S"].includes(tipo)) {
       return res.status(400).json({
@@ -124,22 +126,59 @@ const getCotizaciones = async (req, res) => {
         message: 'Tipo inválido. Debe ser "B" para bienes o "S" para servicios',
       });
     }
-
+    
     // Obtener datos desde la API
     const datosAPI = await obtenerDatosAPI(tipo);
-
+    
     // Obtener datos locales desde la tabla `cotizaciones`
     const datosLocales = await db.cotizaciones.findAll({
       where: { tipo },
       raw: true,
       order: [["sec_sol_mod", "DESC"]],
     });
-
+    
     // Crear un mapa para acceder rápidamente a los datos locales por `nro_pedido`
     const localesMap = new Map(
       datosLocales.map((item) => [item.sec_sol_mod, item])
     );
 
+    const procesarPlazo = (plazo) => {
+      if (!plazo) return { valor: 48, unidad: "hour" }; // Default: 48 horas
+      
+      // Si el plazo es un string con formato HH:mm
+      if (typeof plazo === "string" && plazo.includes(":")) {
+        const [horas, minutos] = plazo
+          .split(":")
+          .map((num) => parseInt(num, 10));
+        if (horas > 0) {
+          return { valor: horas, unidad: "hour" };
+        } else {
+          return { valor: minutos, unidad: "minute" };
+        }
+      }
+      
+      // Si es un número, se interpreta como horas
+      return { valor: parseInt(plazo, 10), unidad: "hour" };
+    };
+    
+    const parsearFecha = (fecha) => {
+      if (!fecha) return null;
+      
+      // Intenta primero con formato fecha y hora
+      let fechaParsed = dayjs(fecha, "DD/MM/YYYY HH:mm:ss");
+      
+      // Si no es válida, intenta solo con fecha
+      if (!fechaParsed.isValid()) {
+        fechaParsed = dayjs(fecha, "DD/MM/YYYY");
+        // Si es válida, añade la hora por defecto (00:00:00)
+        if (fechaParsed.isValid()) {
+          fechaParsed = fechaParsed.hour(0).minute(0).second(0);
+        }
+      }
+      
+      return fechaParsed;
+    };
+    
     // Combinar los datos
     const datosCombinados = datosAPI.map((item) => {
       const local = localesMap.get(item.NRO_PEDIDO) || {
@@ -150,8 +189,17 @@ const getCotizaciones = async (req, res) => {
         anio: new Date().getFullYear().toString(),
         correlativo: null,
         sbn: null,
-        plazo:null
+        plazo: null,
       };
+      
+      const { valor, unidad } = procesarPlazo(local.plazo);
+      const fechaPublicacion = parsearFecha(local.fecha_publicacion);
+      
+      // Calcular fecha de vencimiento solo si hay fecha de publicación
+      let fin = null;
+      if (fechaPublicacion && fechaPublicacion.isValid()) {
+        fin = fechaPublicacion.add(valor, unidad).format("DD/MM/YYYY HH:mm:ss");
+      }
 
       return {
         secSolMod: item.NRO_PEDIDO,
@@ -164,16 +212,18 @@ const getCotizaciones = async (req, res) => {
         anio: local.anio,
         correlativo: local.correlativo,
         sbn: local.sbn,
-        plazo: local.plazo
+        plazo: local.plazo,
+        fecha: local.fecha_publicacion,
+        fin,
       };
     });
-
+    
     datosCombinados.sort((a, b) => {
-      const numA = parseInt(a.secSolMod, 10); // Convertir a número
-      const numB = parseInt(b.secSolMod, 10); // Convertir a número
+      const numA = parseInt(a.secSolMod, 10);
+      const numB = parseInt(b.secSolMod, 10);
       return numB - numA; // Orden descendente
     });
-
+    
     res.status(200).json(datosCombinados);
   } catch (error) {
     console.error("Error en getCotizaciones:", error);
@@ -182,9 +232,7 @@ const getCotizaciones = async (req, res) => {
       message: "Error al obtener las cotizaciones",
     });
   }
-};
-
-
+};;
 
 const updatePdf = async (req, res) => {
   try {
@@ -324,14 +372,16 @@ const updatePublicacion = async (req, res) => {
       if (!publicacionActual.correlativo) {
         // Solo si el correlativo es null o undefined
         const maxCorrelativo = await db.cotizaciones.max("correlativo", {
-          where: { tipo: tipo },
+          where: { tipo: tipo, anio: dayjs().format("YYYY") },
         });
-        const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1001;
+        const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
         datosActualizacion.correlativo = nuevoCorrelativo;
       } else {
         datosActualizacion.correlativo = publicacionActual.correlativo;
       }
-      datosActualizacion.fecha_publicacion = dayjs().format("DD/MM/YYYY");
+      datosActualizacion.fecha_publicacion = dayjs().format(
+        "DD/MM/YYYY HH:mm:ss"
+      );
     } else {
       datosActualizacion.fecha_publicacion = null;
     }
@@ -358,6 +408,7 @@ const updatePublicacion = async (req, res) => {
   }
 };
 
+//Para la pagina de requerimientos para proveedores
 const getCotizacionCompleta = async (req, res) => {
   try {
     const { tipo } = req.query;
@@ -385,50 +436,102 @@ const getCotizacionCompleta = async (req, res) => {
       where: {
         tipo,
         estado: "completado",
-        anio: dayjs().format("YYYY")
+        anio: dayjs().format("YYYY"),
       },
       raw: true,
       order: [["correlativo", "DESC"]],
     });
 
-    // Crear map de datos locales
-    const localesMap = new Map(
-      datosLocales.map((item) => [item.sec_sol_mod, item])
-    );
+    // Función auxiliar para procesar el plazo
+    const procesarPlazo = (plazo) => {
+      if (!plazo) return { valor: 48, unidad: "hour" }; // Default: 48 horas
 
-    const datosCombinados = datosAPI.map((item) => {
-      // Buscar el dato correspondiente en datosLocales usando el NRO_PEDIDO / sec_sol_mod
-      const local = datosLocales.find((local) => local.sec_sol_mod === item.NRO_PEDIDO);
-    
-      if (local && local.estado === "completado") {
-        // Calcular la fecha de vencimiento a partir de la fecha de publicación y el plazo
-        const fechaPublicacion = dayjs(local.fecha_publicacion, "DD/MM/YYYY");
-        const fechaVencimiento = fechaPublicacion.add(local.plazo || 2, "day"); // Plazo predeterminado de 2 días si no existe
-    
-        // Verificar si la fecha de vencimiento ha pasado
-        const terminado = dayjs().startOf('day').isAfter(fechaVencimiento.endOf('day'));
-    
-        // Combinar los datos de datosAPI y datosLocales
-        return {
-          id: local.id,
-          secSolMod: item.NRO_PEDIDO, // Usar el NRO_PEDIDO de datosAPI
-          glosa: local.glosa || item.MOTIVO_PEDIDO, // Priorizar glosa local si existe
-          nombreDependencia: item.NOMBRE_DEPEND,
-          estado: local.estado,
-          pdf: local.pdf
-            ? `https://requerimientos.pems.pe/${local.pdf.replace(/\\/g, "/")}`
-            : null,
-          tipo: local.tipo,
-          fechaRegistro: item.FECHA_REG, // Asegúrate de que FECHA_REG esté en datosAPI
-          correlativo: local.correlativo,
-          fecha: local.fecha_publicacion, // Fecha de publicación de datosLocales
-          fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"), // Fecha de vencimiento
-          terminado: terminado, // Estado de vencimiento
-        };
+      // Si el plazo es un string con formato HH:mm
+      if (typeof plazo === "string" && plazo.includes(":")) {
+        const [horas, minutos] = plazo
+          .split(":")
+          .map((num) => parseInt(num, 10));
+        if (horas > 0) {
+          return { valor: horas, unidad: "hour" };
+        } else {
+          return { valor: minutos, unidad: "minute" };
+        }
       }
-    
-      return null; // Excluir elementos que no estén completados o que no tengan datos locales
-    }).filter((item) => item !== null).sort((a, b) => b.correlativo - a.correlativo);
+
+      // Si es un número, se interpreta como horas
+      return { valor: parseInt(plazo, 10), unidad: "hour" };
+    };
+
+    // Función para parsear fechas con diferentes formatos
+    const parsearFecha = (fecha) => {
+      if (!fecha) return null;
+
+      // Intenta primero con formato fecha y hora
+      let fechaParsed = dayjs(fecha, "DD/MM/YYYY HH:mm:ss");
+
+      // Si no es válida, intenta solo con fecha
+      if (!fechaParsed.isValid()) {
+        fechaParsed = dayjs(fecha, "DD/MM/YYYY");
+        // Si es válida, añade la hora por defecto (00:00:00)
+        if (fechaParsed.isValid()) {
+          fechaParsed = fechaParsed.hour(0).minute(0).second(0);
+        }
+      }
+
+      return fechaParsed;
+    };
+
+    const datosCombinados = datosAPI
+      .map((item) => {
+        const local = datosLocales.find(
+          (local) => local.sec_sol_mod === item.NRO_PEDIDO
+        );
+
+        if (local && local.estado === "completado") {
+          const fechaPublicacion = parsearFecha(local.fecha_publicacion);
+
+          if (!fechaPublicacion || !fechaPublicacion.isValid()) {
+            console.error("Fecha inválida:", {
+              fecha: local.fecha_publicacion,
+              id: local.id,
+              secSolMod: item.NRO_PEDIDO,
+            });
+            return null;
+          }
+
+          // Procesar el plazo
+
+          const { valor, unidad } = procesarPlazo(local.plazo);
+          const fechaVencimiento = fechaPublicacion.add(valor, unidad);
+
+          const terminado = dayjs().isAfter(fechaVencimiento);
+
+          return {
+            id: local.id,
+            secSolMod: item.NRO_PEDIDO,
+            glosa: local.glosa || item.MOTIVO_PEDIDO,
+            nombreDependencia: item.NOMBRE_DEPEND,
+            estado: local.estado,
+            pdf: local.pdf
+              ? `https://requerimientos.pems.pe/${local.pdf.replace(
+                  /\\/g,
+                  "/"
+                )}`
+              : null,
+            tipo: local.tipo,
+            fechaRegistro: item.FECHA_REG,
+            correlativo: local.correlativo,
+            fecha: fechaPublicacion.format("DD/MM/YYYY"),
+            fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"),
+            terminado,
+            fin: fechaVencimiento.format("DD/MM/YYYY HH:mm:ss"),
+          };
+        }
+
+        return null;
+      })
+      .filter((item) => item !== null)
+      .sort((a, b) => b.correlativo - a.correlativo);
 
     return res.json(datosCombinados);
   } catch (error) {
