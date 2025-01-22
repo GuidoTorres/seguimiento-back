@@ -6,7 +6,9 @@ const customParseFormat = require("dayjs/plugin/customParseFormat");
 const fs = require("fs/promises");
 const fsSync = require("fs");
 const path = require("path");
+const utc = require('dayjs/plugin/utc')
 const timezone = require('dayjs/plugin/timezone')
+dayjs.extend(utc)
 dayjs.extend(timezone)
 // Variables para control de sincronización
 let lastSyncTime = 0;
@@ -381,7 +383,7 @@ const updatePublicacion = async (req, res) => {
       } else {
         datosActualizacion.correlativo = publicacionActual.correlativo;
       }
-      datosActualizacion.fecha_publicacion = dayjs().tz("America/Lima").format("DD/MM/YYYY HH:mm:ss")
+      datosActualizacion.fecha_publicacion = dayjs().utc().tz("America/Lima").format("DD/MM/YYYY HH:mm:ss")
     } else {
       datosActualizacion.fecha_publicacion = null;
     }
