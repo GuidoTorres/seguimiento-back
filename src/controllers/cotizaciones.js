@@ -351,61 +351,54 @@ const updatePublicacion = async (req, res) => {
   try {
     const { id, tipo } = req.query;
 
-    // Primero, obtener el estado actual de la publicación
+    // Obtener la publicación actual
     const publicacionActual = await db.cotizaciones.findOne({
       where: { id: id },
     });
-
-    console.log(publicacionActual.sec_sol_mod);
 
     if (!publicacionActual) {
       return res.status(404).json({ msg: "Publicación no encontrada." });
     }
 
-    // Determinar el nuevo estado basado en el estado actual
-    const nuevoEstado =
-      publicacionActual.estado === "pendiente" ? "completado" : "pendiente";
+    // Determinar nuevo estado
+    const nuevoEstado = publicacionActual.estado === "pendiente" ? "completado" : "pendiente";
 
-    // Preparar los datos para la actualización
-    const datosActualizacion = {
-      estado: nuevoEstado,
-    };
+    // Preparar datos de actualización
+    const datosActualizacion = { estado: nuevoEstado };
 
-    // Si el nuevo estado es "completado" y no tiene un correlativo asignado, asignar uno
     if (nuevoEstado === "completado") {
+      // Asignar correlativo solo si no existe
       if (!publicacionActual.correlativo) {
-        // Solo si el correlativo es null o undefined
         const maxCorrelativo = await db.cotizaciones.max("correlativo", {
           where: { tipo: tipo, anio: dayjs().format("YYYY") },
         });
-        const nuevoCorrelativo = maxCorrelativo ? maxCorrelativo + 1 : 1;
-        datosActualizacion.correlativo = nuevoCorrelativo;
-      } else {
-        datosActualizacion.correlativo = publicacionActual.correlativo;
+        datosActualizacion.correlativo = (maxCorrelativo || 0) + 1;
       }
-      datosActualizacion.fecha_publicacion = dayjs().utc().tz("America/Lima").format("DD/MM/YYYY HH:mm:ss")
-    } else {
-      datosActualizacion.fecha_publicacion = null;
+
+      // Mantener fecha existente o asignar nueva solo si no hay
+      if (!publicacionActual.fecha_publicacion) {
+        datosActualizacion.fecha_publicacion = dayjs()
+          .utc()
+          .tz("America/Lima")
+          .format("DD/MM/YYYY HH:mm:ss");
+      }
     }
 
-    await db.cotizaciones.update(datosActualizacion, {
-      where: { id: id },
+    // Actualizar la publicación
+    await db.cotizaciones.update(datosActualizacion, { where: { id: id } });
+
+    // Respuesta
+    const mensaje = nuevoEstado === "completado" 
+      ? `Se publicó con éxito la solicitud nro ${publicacionActual?.sec_sol_mod}.` 
+      : `Se retiró con éxito la publicación de la solicitud nro ${publicacionActual?.sec_sol_mod}.`;
+
+    return res.status(200).json({ 
+      msg: mensaje,
+      nuevoEstado: nuevoEstado 
     });
-    console.log(nuevoEstado);
 
-    if (nuevoEstado === "completado") {
-      return res.status(200).json({
-        msg: `Se publicó con éxito la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
-        nuevoEstado: nuevoEstado,
-      });
-    } else {
-      return res.status(200).json({
-        msg: `Se retiró con éxito la publicación de la solicitud nro ${publicacionActual?.sec_sol_mod}.`,
-        nuevoEstado: nuevoEstado,
-      });
-    }
   } catch (error) {
-    console.log(error);
+    console.error(error);
     return res.status(500).json({ msg: "Error al actualizar el estado." });
   }
 };
