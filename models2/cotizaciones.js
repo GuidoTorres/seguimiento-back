@@ -53,7 +53,7 @@ module.exports = function (sequelize, DataTypes) {
         allowNull: true,
       },
       glosa: {
-        type: DataTypes.STRING,
+        type: DataTypes.TEXT,
         allowNull: true,
       }
     },
