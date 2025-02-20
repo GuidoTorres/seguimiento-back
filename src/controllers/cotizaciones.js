@@ -330,7 +330,7 @@ const updatePdf = async (req, res) => {
 
 const updateGlosa = async (req, res) => {
   try {
-    const glosa = req.body.glosa; // Multer guarda el archivo en `req.file`
+    const glosa = req.body.glosa; 
     const id = req.body.id;
     const plazo = req.body.plazo;
 
