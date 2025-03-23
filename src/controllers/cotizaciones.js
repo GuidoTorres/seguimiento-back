@@ -489,7 +489,7 @@ const getCotizacionCompleta = async (req, res) => {
 
         if (local && local.estado === "completado") {
           const fechaPublicacion = parsearFecha(local.fecha_publicacion);
-
+          
           if (!fechaPublicacion || !fechaPublicacion.isValid()) {
             console.error("Fecha inválida:", {
               fecha: local.fecha_publicacion,
@@ -502,8 +502,13 @@ const getCotizacionCompleta = async (req, res) => {
           // Procesar el plazo
 
           const { valor, unidad } = procesarPlazo(local.plazo);
+          
+          // Calcular fecha de vencimiento solo si hay fecha de publicación
+          let fin = null;
+          if (fechaPublicacion && fechaPublicacion.isValid()) {
+            fin = fechaPublicacion.add(valor, unidad).format("DD/MM/YYYY HH:mm:ss");
+          }
           const fechaVencimiento = fechaPublicacion.add(valor, unidad);
-
           const terminado = dayjs().isAfter(fechaVencimiento);
 
           return {
@@ -521,10 +526,10 @@ const getCotizacionCompleta = async (req, res) => {
             tipo: local.tipo,
             fechaRegistro: item.FECHA_REG,
             correlativo: local.correlativo,
-            fecha: fechaPublicacion.format("DD/MM/YYYY"),
+            fecha: local.fecha_publicacion,
             fecha_vencimiento: fechaVencimiento.format("DD/MM/YYYY"),
             terminado,
-            fin: fechaVencimiento.format("DD/MM/YYYY HH:mm:ss"),
+            fin
           };
         }
 
